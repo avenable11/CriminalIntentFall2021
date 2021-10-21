@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Criminal Intent Fall 2021</string>
+    <string name="crime_title">Title</string>
+    <string name="crime_title_helper">Enter a title for the crime.</string>
+    <string name="crime_details_label">Details</string>
+    <string name="crime_solved_label">Solved</string>
+</resources>
