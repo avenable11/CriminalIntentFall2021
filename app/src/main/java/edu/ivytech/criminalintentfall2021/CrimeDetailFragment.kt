@@ -1,6 +1,13 @@
 package edu.ivytech.criminalintentfall2021
 
+import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
+import android.provider.ContactsContract
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
@@ -9,8 +16,12 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import edu.ivytech.criminalintentfall2021.databinding.FragmentCrimeBinding
 import android.text.format.DateFormat
+import android.util.Log
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.launch
 import androidx.fragment.app.FragmentResultListener
 import androidx.lifecycle.ViewModelProvider
+import java.io.FileOutputStream
 import java.util.*
 
 private const val DIALOG_DATE = "DialogDate"
@@ -21,6 +32,47 @@ class CrimeDetailFragment : Fragment(),FragmentResultListener {
     private lateinit var binding: FragmentCrimeBinding
     private val crimeDetailViewModel :CrimeDetailViewModel by lazy {
         ViewModelProvider(requireActivity()).get(CrimeDetailViewModel::class.java)
+    }
+    private val getSuspect = registerForActivityResult(ActivityResultContracts.PickContact()){
+        uri : Uri? ->
+        val queryFields = arrayOf(ContactsContract.Contacts.DISPLAY_NAME)
+        val cursor = uri?.let{
+            requireActivity().contentResolver.query(it, queryFields, null, null, null)
+        }
+        cursor?.use {
+            if(it.count == 0) {
+                return@registerForActivityResult
+            }
+            it.moveToFirst()
+            val suspect = it.getString(0)
+            crime.suspect = suspect
+            crimeDetailViewModel.saveCrime(crime)
+            binding.crimeSuspect.text = suspect
+
+        }
+    }
+
+    private val camera = registerForActivityResult(ActivityResultContracts.TakePicturePreview()) {
+        bitmap ->
+        binding.crimePhoto.setImageBitmap(bitmap)
+        val photoFile = crimeDetailViewModel.getPhotoFile(crime)
+        val fileOutputStream:FileOutputStream = FileOutputStream(photoFile)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, fileOutputStream)
+    }
+    private val permission = registerForActivityResult(ActivityResultContracts.RequestPermission())
+    {
+        granted->
+        when {
+            granted-> {
+                camera.launch()
+            }
+            !shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) -> {
+                Log.e("Crime Detail", "Camera permission never ask again")
+            }
+            else -> {
+                Log.e("Crime Detail", "Camera permission not granted")
+            }
+        }
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,6 +109,13 @@ class CrimeDetailFragment : Fragment(),FragmentResultListener {
         binding.crimeTitle.setText(crime.title)
         binding.crimeDate.text = DateFormat.format("EEEE, MMM dd, yyyy", crime.date)
         binding.crimeSolved.isChecked = crime.isSolved
+        if(!crime.suspect.isBlank())
+            binding.crimeSuspect.text = crime.suspect
+        val photoFile = crimeDetailViewModel.getPhotoFile(crime)
+        if(photoFile.path != null) {
+            val bitmap: Bitmap? = BitmapFactory.decodeFile(photoFile.path)
+            binding.crimePhoto.setImageBitmap(bitmap)
+        }
     }
 
     override fun onStart() {
@@ -84,8 +143,35 @@ class CrimeDetailFragment : Fragment(),FragmentResultListener {
             DatePickerFragment.newInstance(crime.date, DIALOG_DATE)
                 .show(this@CrimeDetailFragment.parentFragmentManager, DIALOG_DATE)
         }
+        binding.crimeReport.setOnClickListener{
+            try {
+                Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, getCrimeReport())
+                    putExtra(Intent.EXTRA_SUBJECT, getString(R.string.crime_report_subject))
+                }.also { intent ->
+                    val chooserIntent = Intent.createChooser(intent, getString(R.string.send_report))
+                    startActivity(chooserIntent)
+                }
+            }
+            catch (e : ActivityNotFoundException)
+            {
+                Log.e("Crime Detail", "Unable to send report", e)
+            }
+        }
 
-
+        binding.crimeSuspect.setOnClickListener{
+            try {
+                getSuspect.launch()
+            } catch (e : ActivityNotFoundException)
+            {
+                Log.e("Crime Detail", "Could not get contact", e)
+                binding.crimeSuspect.isEnabled = false
+            }
+        }
+        binding.crimeCamera.setOnClickListener {
+            permission.launch(Manifest.permission.CAMERA)
+        }
 
 
         //binding.crimeDate.setText(crime.date.toString());
@@ -119,5 +205,20 @@ class CrimeDetailFragment : Fragment(),FragmentResultListener {
         }
 
 
+    }
+
+    private fun getCrimeReport() : String {
+        val solvedString = if(crime.isSolved) {
+            getString(R.string.crime_report_solved)
+        } else {
+            getString(R.string.crime_report_unsolved)
+        }
+        val dateString = DateFormat.format("EEEE, MMM dd, yyyy", crime.date).toString()
+        var suspect = if(crime.suspect.isBlank()) {
+            getString(R.string.crime_report_no_suspect)
+        } else {
+            getString(R.string.crime_report_suspect,crime.suspect)
+        }
+        return getString(R.string.crime_report, crime.title, dateString, solvedString, suspect)
     }
 }
